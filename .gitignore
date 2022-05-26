@@ -1,0 +1,12 @@
+__pycache__/
+.idea/
+input/
+output/
+osm-password
+rpj.osm
+progress.csv
+izlaz.csv
+conflate-progress.pickle
+process.log
+measurement.log
+overpass_db/

@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+
+    <title>Import registra prostornih jedinica - 31.01.2019.</title>
+    <meta name="description" content="Import registra prostornih jedinica">
+    <meta name="author" content="Branko Kokanović">
+
+    <link type="text/css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jsgrid/1.5.3/jsgrid.min.css" />
+    <link type="text/css" rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/jsgrid/1.5.3/jsgrid-theme.min.css" />
+</head>
+
+<body>
+    <h1>Import registra prostornih jedinica - 31.01.2019.</h1>
+    <a href="#" id="toggleLegend">Prikaži legendu</a>
+    <div id="legend" style="display: none;">
+    <p>Pogledajte <a href="https://forum.openstreetmap.org/viewtopic.php?id=68288">forum</a> ako želite da pomognete. Evo objašnjenja kolona:<p>
+        <ul>
+            <li><strong>Way ID</strong> &mdash; ID way-a iz rpj-v2.osm fajla pripremljenog za import. Nije od velike važnosti</li>
+            <li><strong>Granična naselja</strong> &mdash; Jedno ili dva naselja sa kojima se ovaj put graniči</li>
+            <li><strong>OSM Way</strong> &mdash; ukoliko je jednoznačno određen way u OSM-u, biće upisan ovde</li>
+            <li><strong>Stanje sređivanja</strong> &mdash; da li je sređivanje odrađeno, da li je moguće i ako nije moguće - razlog zašto nije</li>
+            <li><strong>Dodatak uz grešku</strong> &mdash; ako je bilo greške, ovde je dopisan dodatak uz grešku koji može da pomogne u popravljanju</li>
+        </ul>
+        <p>Evo spiska svih grešaka:</p>
+        <ul>
+            {% for key, value in errors.items() %}
+                <li><strong>{{ key.name }}</strong> &mdash; {{ value }}</li>
+            {% endfor %}
+        </ul>
+        <p>Statistika:</p>
+        <ul>
+            <li><strong>Ukupno puteva</strong> &mdash; {{ total_ways }}</li>
+            <li><strong>Obrađeno puteva</strong> &mdash; {{ processed_ways}} </li>
+            <li><strong>Puteva nađeno u OSM-u</strong> &mdash; {{ ways_with_osm_ways_found }}</li>
+        </ul>
+        <p>Po stanju sređivanja</p>
+        <ul>
+            {% for key, value in count_per_error.items() %}
+                <li><strong>{{ key.name }}</strong> &mdash; {{ value }} ({{ "{:.2f}".format((100.0 * value) / total_ways) }}%)</li>
+            {% endfor %}
+        </ul>
+    </div>
+    <div id="jsGrid"></div>
+
+    <script type="text/javascript" src="https://ajax.aspnetcdn.com/ajax/jQuery/jquery-2.2.4.min.js"></script>
+    <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jsgrid/1.5.3/jsgrid.min.js"></script>
+
+    <script>
+        $(document).ready(function () {
+            $('#toggleLegend').click(function () {
+                $('#legend').slideToggle("slow");
+            });
+        });
+
+        String.prototype.replaceAll = function (find, replace) {
+            var str = this;
+            return str.replace(new RegExp(find, 'g'), replace);
+        };
+
+        function transliterate(s) {
+            return s.toLowerCase()
+                .replaceAll('а', 'a')
+                .replaceAll('б', 'b')
+                .replaceAll('в', 'v')
+                .replaceAll('г', 'g')
+                .replaceAll('д', 'd')
+                .replaceAll('ђ', 'dj')
+                .replaceAll('е', 'e')
+                .replaceAll('ж', 'z')
+                .replaceAll('з', 'z')
+                .replaceAll('и', 'i')
+
+                .replaceAll('ј', 'j')
+                .replaceAll('к', 'k')
+                .replaceAll('л', 'l')
+                .replaceAll('љ', 'lj')
+                .replaceAll('м', 'm')
+                .replaceAll('н', 'n')
+                .replaceAll('њ', 'nj')
+                .replaceAll('о', 'o')
+                .replaceAll('п', 'p')
+                .replaceAll('р', 'r')
+
+                .replaceAll('с', 's')
+                .replaceAll('т', 't')
+                .replaceAll('ћ', 'c')
+                .replaceAll('у', 'u')
+                .replaceAll('ф', 'f')
+                .replaceAll('х', 'h')
+                .replaceAll('ц', 'c')
+                .replaceAll('ч', 'c')
+                .replaceAll('џ', 'dz')
+                .replaceAll('ш', 's')
+
+                .replaceAll('đ', 'dj')
+                .replaceAll('ž', 'z')
+                .replaceAll('ć', 'c')
+                .replaceAll('č', 'c')
+                .replaceAll('š', 's');
+        }
+
+        var db = {
+            loadData: function(filter) {
+                return $.grep(this.clients, function(client) {
+
+                    return (!filter.error || client.error === filter.error)
+                        && (!filter.relations || client.relations_latin.toLowerCase().indexOf(transliterate(filter.relations)) > -1);
+                });
+            },
+        };
+
+        window.db = db;
+
+        db.clients = [
+{# This is ugly and condensed because it shaves multiple MBs in produced HTML! #}
+{%- for way_id, way in source_data.items() %}
+    {"way_id": {{ way_id }},
+    "relations": "{{ way.relations }}",
+    "osm_way": {% if way.osm_way %}"<a href=\"https://www.openstreetmap.org/way/{{ way.osm_way }}\" target=\"_blank\">{{ way.osm_way }}</a>"{% else %}""{% endif %},
+    "error": "{{ way.processed.name }}",
+    "error_context": "{{ way.error_context }}"},
+{% endfor %}
+        ];
+
+        db.errors = [
+            { Name: undefined, Id: undefined },
+            {% for key, value in errors.items() %}{ Name: "{{ key.name }}", Id: "{{ key.name }}" },{% endfor %}
+        ];
+
+        db.clients.forEach(element => {
+            element['relations_latin'] = transliterate(element['relations']);
+        });
+
+        $("#jsGrid").jsGrid({
+            width: "100%",
+            height: "auto",
+
+            pageSize: 1000,
+            filtering: true,
+            inserting: false,
+            editing: false,
+            heading: true,
+            sorting: true,
+            paging: true,
+            selecting: false,
+            autoload: true,
+
+            noDataContent: "Nije ništa pronađeno",
+            pagerFormat: "Strane: {first} {prev} {pages} {next} {last}    {pageIndex} od {pageCount}",
+            pagePrevText: "Prethodna",
+            pageNextText: "Sledeća",
+            pageFirstText: "Prva",
+            pageLastText: "Poslednja",
+
+            controller: db,
+
+            fields: [
+                { name: "way_id", type: "text", width: 100, title: "Way ID", filtering: false },
+                { name: "relations", type: "text", width: 300, title: "Granična naselja", filtering: true },
+                { name: "osm_way", type: "text", width: 100, title: "OSM Way", filtering: false },
+                { name: "error", type: "select", items: db.errors, valueField: "Id", textField: "Name", title: "Stanje sređivanja", width: 200, filtering: true },
+                { name: "error_context", type: "text", width: 300, title: "Dodatak uz grešku", filtering: false },
+            ]
+        });
+    </script>
+</body>
+
+</html>
