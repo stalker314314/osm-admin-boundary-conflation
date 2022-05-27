@@ -23,8 +23,8 @@ def process(diff_type: str, entity_type: str, baseline_csv: str, new_csv: str) -
         reader = csv.DictReader(csvfile)
         for row in reader:
             baseline_entities[row['relation_id']] = {
-                'district': row['district'],
-                'name': row['municipality'] if entity_type == 'opstina' else row['settlement'],
+                'district': row['level6'],
+                'name': row['level8'] if entity_type == 'level8' else row['level9'],
                 'relation_id': row['relation_id'], 'area_not_shared': float(row['area_not_shared'])
             }
     new_entities = {}
@@ -32,20 +32,20 @@ def process(diff_type: str, entity_type: str, baseline_csv: str, new_csv: str) -
         reader = csv.DictReader(csvfile)
         for row in reader:
             new_entities[row['relation_id']] = {
-                'district': row['district'],
-                'name': row['municipality'] if entity_type == 'opstina' else row['settlement'],
+                'level6': row['level6'],
+                'name': row['level8'] if entity_type == 'level8' else row['level9'],
                 'area_not_shared': float(row['area_not_shared'])
             }
 
     messages_sent = 0
     for new_relation_id, new_entity in new_entities.items():
         if messages_sent > 10:
-            telegram_sendtext('Azuriran je {0} i porede se {1}, ali ima vise od 10 promena, stajemo sa slanjem'.format(
+            telegram_sendtext('{0} refreshed and compared with {1}, but there are more than 10 regressions, stopping with sending'.format(
                 diff_type, entity_type
             ))
             break
         if new_relation_id not in baseline_entities:
-            telegram_sendtext('Azuriran je {0}. Relacija {1} ({2} {3}) sad postoji, a nije postojala pre.'.format(
+            telegram_sendtext('{0} refreshed. Relation {1} ({2} {3}) exist now and it didn\'t existed before.'.format(
                 diff_type, new_relation_id, entity_type, new_entity['name']
             ))
             messages_sent += 1
@@ -53,20 +53,20 @@ def process(diff_type: str, entity_type: str, baseline_csv: str, new_csv: str) -
         baseline_area_not_shared = baseline_entities[new_relation_id]['area_not_shared']
         new_area_not_shared = new_entity['area_not_shared']
         if new_area_not_shared > 0 and (new_area_not_shared - baseline_area_not_shared) > 0:  # It was: new_area_not_shared > 0.01
-            telegram_sendtext('Azuriran je {0} i {1} {2} (okrug {3}, relacija {4}) je bila neuskladjena {5}%, a sada {6}%'.format(
-                diff_type, entity_type, new_entity['name'], new_entity['district'], new_relation_id,
+            telegram_sendtext('{0} refreshed and {1} {2} (district {3}, relation {4}) was different {5}%, but now it is {6}%'.format(
+                diff_type, entity_type, new_entity['name'], new_entity['level6'], new_relation_id,
                 100 * baseline_area_not_shared, 100 * new_area_not_shared)
             )
             messages_sent += 1
 
     for baseline_relation_id, baseline_entity in baseline_entities.items():
         if messages_sent > 10:
-            telegram_sendtext('Azuriran je {0} i porede se {1}, ali ima vise od 10 promena, stajemo sa slanjem'.format(
+            telegram_sendtext('{0} refreshed and compared with {1}, but there are more than 10 regressions, stopping with sending'.format(
                 diff_type, entity_type
             ))
             break
         if baseline_relation_id not in new_entities:
-            telegram_sendtext('Azuriran je {0}. Relacija {1} ({2} {3}) je postojala ranije, a sad ne postoji.'.format(
+            telegram_sendtext('{0} refreshed. Relation {1} ({2} {3}) existed before and it doesn\'t exist now.'.format(
                 diff_type, baseline_relation_id, entity_type, new_entity['name']
             ))
             messages_sent += 1
@@ -79,19 +79,19 @@ def main():
         print("Not enough arguments, quitting")
         exit()
     diff_type = sys.argv[1].upper()
-    if diff_type not in ('RGZ', 'OSM'):
-        print('First argument (diff type) need to be rgz or osm')
+    if diff_type not in ('CADASTRE', 'OSM'):
+        print('First argument (diff type) need to be Cadastre or OSM')
         exit()
     entity_type = sys.argv[2]
-    if entity_type not in ('naselje', 'opstina'):
-        print('Second argument (entity type) need to be naselje or opstina')
+    if entity_type not in ('level8', 'level9'):
+        print('Second argument (entity type) need to be level8 or level9')
         exit()
 
     baseline_csv = sys.argv[3]
     new_csv = sys.argv[4]
     messages_sent = process(diff_type, entity_type, baseline_csv, new_csv)
     if messages_sent == 0:
-        telegram_sendtext(f'RGZ analysis done for {entity_type} {diff_type} diff type for '
+        telegram_sendtext(f'Cadastre analysis done for {entity_type} {diff_type} diff type for '
                           f'{datetime.date.strftime(datetime.date.today(), "%d.%m.%Y")}')
 
 

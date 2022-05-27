@@ -4,7 +4,7 @@
 
 Linux is far convenient to install all these Python packages. On Windows, your best bet is Conda, but here are brief instractions for Debian:
 ```
-sudo apt install proj-bin libproj-dev
+sudo apt install proj-bin libproj-dev curl gdal-bin
 python -m pip install -r requirements.txt 
 ```
 
@@ -55,7 +55,6 @@ Fajlovi od interesa:
   analizira koji way-ovi mogu da se conflate-uju i radi automatsku konflaciju
 * `conflate-statistics.py` &mdash; skripta koja na osnovu `conflate-progress.pickle` izbacuje `index.html` stranu sa rezultatima conflate-ovanja
 * `send_notifications.py` &mdash; finalna skripta koja poredi merenja pre i posle i šalje na Telegram (treba podesiti token od Telegram bota i kanal na koji da se šalju obaveštenja)
-* `preklapanja.py` &mdash; skripta koja iz naselja.csv generiše .csv fajl sa wkt geometrijama sa novoformiranim, conflate-ovanim putevima
 * `translation.py` &mdash; uzet sa projekta https://github.com/maxerickson/michigantownships i koristi se za generisanje naselja.osm fajla
 * `add_maticni_broj.py` &mdash; jednokratna skripta koja je iz ulaznog `measure_quality_naselja.csv` dodavala automatski u OSM `ref:RS:naselje` i `ref:RS:opstina` tamo gde je mogla
 

@@ -81,7 +81,7 @@ def get_osm_shared_ways(api, r1, r2):
         way.a4;
         (._;>;);
         out;
-        // &contact=https://gitlab.com/stalker314314/prostorne-jedinice-import/
+        // &contact=https://github.com/stalker314314/osm-admin-boundary-conflation/
     """.format(r1, r2))
     return response
 
@@ -98,7 +98,7 @@ def get_osm_single_way(api, r1):
         way.a3;
         (._;>;);
         out;
-        // &contact=https://gitlab.com/stalker314314/prostorne-jedinice-import/
+        // &contact=https://github.com/stalker314314/osm-admin-boundary-conflation/
     """.format(r1))
     return response
 
@@ -110,7 +110,7 @@ def get_entities_shared_with_way(api, way_id):
         ._;>;
         ._;<;
         out;
-        // &contact=https://gitlab.com/stalker314314/prostorne-jedinice-import/
+        // &contact=https://github.com/stalker314314/osm-admin-boundary-conflation/
         """.format(way_id))
     return response
 

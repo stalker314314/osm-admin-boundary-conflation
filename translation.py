@@ -1,6 +1,5 @@
 import geom
 
-import csv
 import os
 
 __location__ = os.path.dirname(os.path.realpath(__file__))
@@ -9,32 +8,34 @@ __location__ = os.path.dirname(os.path.realpath(__file__))
 def filterTags(tags):
     if tags is None:
         return
-    newtags = {}
-    newtags["naselje"] = tags["naselje"]
-    newtags["opstina"] = tags["opstina"]
-    newtags["okrug"] = tags["okrug"]
-    newtags["naselje_mb"] = tags['naselje_mb']
-    newtags["opstina_mb"] = tags['opstina_mb']
-    newtags["okrug_sifra"] = tags['okrug_sfr']
-    newtags["mz"] = tags['mz_mb']
-    newtags["mz_mb"] = tags['mz_mb']
-    newtags["boundary"] = "administrative"
-    if tags["mz"] is None or tags["mz"] == '':
-        if tags["naselje"] is None or tags["naselje"] == '':
-            if tags["opstina"] is None or tags['opstina'] == '':
-                if tags['okrug'] is None or tags['okrug'] == '':
+    newtags = {
+        "level6_name": tags["level6name"],
+        "level6_id": tags["level6id"],
+        "level7_name": tags["level7name"],
+        "level7_id": tags["level7id"],
+        "level8_name": tags["level8name"],
+        "level8_id": tags["level8id"],
+        "level9_name": tags["level9name"],
+        "level9_id": tags["level9id"],
+        "boundary": "administrative"
+    }
+
+    if tags["level9name"] is None or tags["level9name"] == '':
+        if tags["level8name"] is None or tags["level8name"] == '':
+            if tags["level7name"] is None or tags["level7name"] == '':
+                if tags["level6name"] is None or tags["level6name"] == '':
                     newtags['name'] = ''
                 else:
-                    newtags['name'] = tags['okrug']
+                    newtags['name'] = tags['level6name']
             else:
-                newtags['name'] = tags['opstina']
+                newtags['name'] = tags['level7name']
         else:
-            newtags['name'] = tags['naselje']
-            newtags["admin_level"] = "9"
+            newtags['name'] = tags['level8name']
     else:
-        newtags['name'] = tags['mz']
-        newtags["admin_level"] = "10"
+        newtags['name'] = tags['level9name']
+        newtags["admin_level"] = "9"
     newtags["type"] = "boundary"
+    # TODO: move to config
     newtags["source"] = "open Serbian cadastre data Jan 2022"
     return newtags
 
@@ -293,7 +294,7 @@ def preOutputTransform(geometries, features):
     ways = [g for g in geometries if isinstance(g, geom.Way)]
     featuresmap = {feature.geometry: feature for feature in features}
     for way in ways:
-        maticni = []
+        level9ids = []
         for parent in way.parents:
             admin_levels = []
             boundaries = []
@@ -303,15 +304,13 @@ def preOutputTransform(geometries, features):
                     admin_levels.append(parfeat.tags["admin_level"])
                 if "boundary" in parfeat.tags:
                     boundaries.append(parfeat.tags["boundary"])
-                    # for MZ - maticni.append(parfeat.tags['mz_mb'])
-                    maticni.append(parfeat.tags['naselje_mb'])
+                    level9ids.append(parfeat.tags['level9_id'])
         newtags = {}
         if admin_levels:
             newtags["admin_level"] = min(admin_levels, key=int)
         if boundaries:
             newtags["boundary"] = boundaries.pop()
-        # for MZ - newtags['mz_mb'] = ','.join(maticni)
-        newtags['naselje_mb'] = ','.join(maticni)
+        newtags['level9_id'] = ','.join(level9ids)
         if newtags:
             if way not in featuresmap:
                 feat = geom.Feature()

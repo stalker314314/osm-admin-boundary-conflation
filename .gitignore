@@ -10,3 +10,4 @@ conflate-progress.pickle
 process.log
 measurement.log
 overpass_db/
+ogr2osm/
