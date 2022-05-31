@@ -1,8 +1,12 @@
 import geom
+import yaml
 
 import os
 
 __location__ = os.path.dirname(os.path.realpath(__file__))
+
+with open('config.yml', 'r') as config_yml_file:
+    config = yaml.safe_load(config_yml_file)
 
 
 def filterTags(tags):
@@ -35,8 +39,7 @@ def filterTags(tags):
         newtags['name'] = tags['level9name']
         newtags["admin_level"] = "9"
     newtags["type"] = "boundary"
-    # TODO: move to config
-    newtags["source"] = "open Serbian cadastre data Jan 2022"
+    newtags["source"] = config['changeset_source']
     return newtags
 
 

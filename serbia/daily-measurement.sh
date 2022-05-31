@@ -23,6 +23,17 @@ else
   echo "Overpass is not working"
 fi
 
+function refresh_cadastre_data {
+  python3 serbia2input.py input/all.csv
+  python3 ../inputcsv2shp.py input/all.csv output/shp/all.shp
+  ../shp2osm.sh output/shp/all.shp output/osm/all.osm
+}
+
+if [ ! -f input/all.csv ]; then
+  echo "No input file, recreating from scratch (losing diff from Serbia cadastre from yesterday)"
+  refresh_cadastre_data
+fi
+
 shopt -s nullglob
 shp_files=( ./output/shp/*.shp )
 found_files=( ${#shp_files[@]} )
@@ -30,27 +41,24 @@ echo "Found $found_files files"
 
 if [[ $found_files -eq "0" ]]; then
   echo "No shp files, recreating them from scratch (losing diff from Serbia cadastre from yesterday)"
-  ./refresh-cadastre-data.sh
+  refresh_cadastre_data
 fi
+
 
 echo "Setting up yesterday data"
 ../refresh-osm-data.sh europe serbia yesterday ../overpass_db
 
 # Do baseline measurement
-python3 measure_quality.py
-mv output/level9.csv output/level9-baseline-$yesterday.csv
+python3 ../measure_quality.py input/all.csv output/level9-baseline-$yesterday.csv
 sort -o output/level9-baseline-$yesterday.csv output/level9-baseline-$yesterday.csv
 
 # Refresh cadastre and do measurements now
 echo "Refreshing cadastre data"
-python3 serbia2input.py input/all.csv
-python3 ../inputcsv2shp.py input/all.csv output/shp/all.shp
-../shp2osm.sh output/shp/all.shp output/osm/all.osm
+refresh_cadastre_data
 sleep 10
 
 echo "Measuring settlements after cadastre is refreshed"
-python3 measure_quality.py
-mv output/level9.csv output/level9-cadastre-$currentdate.csv
+python3 ../measure_quality.py input/all.csv output/level9-cadastre-$currentdate.csv
 sort -o output/level9-cadastre-$currentdate.csv output/level9-cadastre-$currentdate.csv
 diff -u output/level9-baseline-$yesterday.csv output/level9-cadastre-$currentdate.csv > output/level9-cadastre-$currentdate.diff || true
 python3 send_notification.py cadastre level9 output/level9-baseline-$yesterday.csv output/level9-cadastre-$currentdate.csv
@@ -61,8 +69,7 @@ echo "Refreshing OSM data"
 sleep 10
 
 echo "Measuring settlements after OSM is refreshed"
-python3 measure_quality.py
-mv output/level9.csv output/level9-osm-$currentdate.csv
+python3 ../measure_quality.py input/all.csv output/level9-osm-$currentdate.csv
 sort -o output/level9-osm-$currentdate.csv output/level9-osm-$currentdate.csv
 diff -u output/level9-baseline-$yesterday.csv output/level9-osm-$currentdate.csv > output/level9-osm-$currentdate.diff || true
 python3 send_notification.py osm level9 output/level9-baseline-$yesterday.csv output/level9-osm-$currentdate.csv

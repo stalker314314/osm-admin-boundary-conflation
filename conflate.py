@@ -1,46 +1,21 @@
+import math
 import os
 import pickle
+import sys
 import time
 import xml.etree.ElementTree as ET
-from enum import Enum
-import math
 
 import matplotlib.pyplot as plt
 import overpy
 import pyproj
 import shapely.geometry as geometry
+import yaml
+
 from osmapi import OsmApi
-from common import retry_on_error
 from shapely.ops import linemerge
 
-MAX_DISTANCE_END_POINTS_TO_CONSIDER_IN_METERS = 500
-DRY_RUN = True
-AUTO_PROCEED = True
-UNGLUE_WAYS_AS_NEEDED = False
-
-
-class ProcessingState(Enum):
-    NO = 1
-    CHECKED_POSSIBLE = 2
-    CONFLATED = 3
-    ERROR_END_POINTS_FAR_APART = 4
-    ERROR_GEOMETRY_WRONG = 5
-    ERROR_SHARED_WAY_NOT_FOUND = 6
-    ERROR_WAY_NOT_FOUND = 7
-    ERROR_MULTIPLE_SHARED_WAYS = 8
-    ERROR_MULTIPLE_SINGLE_WAY = 9
-    ERROR_NODES_WITH_TAGS = 10
-    ERROR_NATIONAL_BORDER = 11
-    ERROR_UNEXPECTED_TAG = 12
-    ERROR_NODE_IN_OTHER_WAYS = 13
-    ERROR_NODE_IN_NATIONAL_BORDER = 14
-    ERROR_NODE_IN_OTHER_RELATION = 15
-    ERROR_NODE_IN_NATIONAL_RELATION = 16
-    ERROR_INVALID_SHAPE = 17
-    ERROR_CLOSED_SHAPE = 18
-    ERROR_OSM_WAY_IS_MORE_COMPLEX = 19
-    ERROR_OVERLAPPING_WAYS = 20
-    ERROR_TOO_MANY_NODES = 21
+from common import retry_on_error
+from processing_state import ProcessingState
 
 
 def load_osm(path):
@@ -49,57 +24,75 @@ def load_osm(path):
     relations = {}
     root = ET.parse(path).getroot()
     for node in root.findall('node'):
-        nodes[int(node.attrib['id'])] = {'lat': float(node.attrib['lat']), 'lon': float(node.attrib['lon'])}
+        nodes[int(node.attrib['id'])] = {
+            'lat': float(node.attrib['lat']),
+            'lon': float(node.attrib['lon'])
+        }
+
     for way in root.findall('way'):
         way_nodes = []
         for child in way.iter('nd'):
             way_nodes.append(int(child.attrib['ref']))
         ways[int(way.attrib['id'])] = {
-            'nodes': way_nodes, 'relations': '', 'processed': ProcessingState.NO, 'error_context': None, 'osm_way': None}
+            'nodes': way_nodes,
+            'relations': '',
+            'processed': ProcessingState.NO,
+            'error_context': None,
+            'osm_way': None
+        }
+
     for relation in root.findall('relation'):
         relation_ways = []
         for child in relation.iter('member'):
             relation_ways.append(
-                {'ref': int(child.attrib['ref']), 'role': child.attrib['role'], 'type': child.attrib['type']})
+                {
+                    'ref': int(child.attrib['ref']),
+                    'role': child.attrib['role'],
+                    'type': child.attrib['type']
+                })
         tags = {}
         for child in relation.iter('tag'):
             tags[child.attrib['k']] = child.attrib['v']
-        relations[int(relation.attrib['id'])] = {'ways': relation_ways, 'tags': tags}
+        relations[int(relation.attrib['id'])] = {
+            'ways': relation_ways,
+            'tags': tags
+        }
+
     return {'relations': relations, 'ways': ways, 'nodes': nodes}
 
 
 @retry_on_error()
-def get_osm_shared_ways(api, r1, r2):
-    response = api.query("""
-        area["name"="Србија"]["admin_level"=2]->.a;
-        relation(area.a)["boundary"="administrative"]["admin_level"=9]["ref:RS:naselje"="{0}"]->.prvaRelacija;
-        relation(area.a)["boundary"="administrative"]["admin_level"=9]["ref:RS:naselje"="{1}"]->.drugaRelacija;
-        (.prvaRelacija;>;)->.a1;
-        (.drugaRelacija;>;)->.a2;
+def get_osm_shared_ways(api, r1, r2, country, id_key):
+    response = api.query(f"""
+        area["name"="{country}"]["admin_level"=2]->.a;
+        relation(area.a)["boundary"="administrative"]["admin_level"=9]["{id_key}"="{r1}"]->.firstRelation;
+        relation(area.a)["boundary"="administrative"]["admin_level"=9]["{id_key}"="{r2}"]->.secondRelation;
+        (.firstRelation;>;)->.a1;
+        (.secondRelation;>;)->.a2;
         (.a1;- .a2;)->.a3;
         (.a1;- .a3;)->.a4;
         way.a4;
         (._;>;);
         out;
         // &contact=https://github.com/stalker314314/osm-admin-boundary-conflation/
-    """.format(r1, r2))
+    """)
     return response
 
 
 @retry_on_error()
-def get_osm_single_way(api, r1):
-    response = api.query("""
-        area["name"="Србија"]["admin_level"=2]->.a;
-        relation(area.a)["boundary"="administrative"]["admin_level"=9]["ref:RS:naselje"="{0}"]->.prvaRelacija;
-        relation(area.a)["boundary"="administrative"]["admin_level"=9]["ref:RS:naselje"!="{0}"]->.drugeRelacije;
-        (.prvaRelacija ;>;) -> .a1;
-        (.drugeRelacije;>;) -> .a2;
+def get_osm_single_way(api, r1, country, id_key):
+    response = api.query(f"""
+        area["name"="{country}"]["admin_level"=2]->.a;
+        relation(area.a)["boundary"="administrative"]["admin_level"=9]["{id_key}"="{r1}"]->.firstRelation;
+        relation(area.a)["boundary"="administrative"]["admin_level"=9]["{id_key}"!="{r1}"]->.secondRelation;
+        (.firstRelation ;>;) -> .a1;
+        (.secondRelation;>;) -> .a2;
         (way.a1;- way.a2;) -> .a3;
         way.a3;
         (._;>;);
         out;
         // &contact=https://github.com/stalker314314/osm-admin-boundary-conflation/
-    """.format(r1))
+    """)
     return response
 
 
@@ -140,12 +133,14 @@ def create_geometry_from_osm_file_data(source_data, way):
     return merged
 
 
-def unglue_ways(osmapi, way_boundary_id, way_other_id):
+def unglue_ways(config, osmapi, way_boundary_id, way_other_id):
     """
     Given admin boundary way and other way that shares some nodes with it, unglues those shared nodes into separate ones
     It adds new node and changes boundary to remove shared one and adds new one at the same place.
     It will not unglue endpoints
     """
+    auto_proceed = config['auto_proceed']
+
     way_boundary = osmapi.WayGet(way_boundary_id)
     way_other = osmapi.WayGet(way_other_id)
     if len(way_other['tag']) == 0 or len(way_boundary['tag']) == 0:
@@ -165,7 +160,7 @@ def unglue_ways(osmapi, way_boundary_id, way_other_id):
 
     print('{0} nodes will be unglued from boundary https://www.openstreetmap.org/way/{1} and way '
           'https://www.openstreetmap.org/way/{2}'.format(len(shared_nodes), way_boundary_id, way_other_id))
-    if len(shared_nodes) > 0 and not AUTO_PROCEED:
+    if len(shared_nodes) > 0 and not auto_proceed:
         proceed = input('Proceed (Y/n)')
         if not (proceed == '' or proceed.lower() == 'y' or proceed.lower() == u'з'):
             return False
@@ -192,10 +187,13 @@ def unglue_ways(osmapi, way_boundary_id, way_other_id):
         return False
 
 
-def is_conflate_possible(osmapi, overpass_api, shapely_source_way, found_osm_way, shapely_found_osm_way):
+def is_conflate_possible(config, osmapi, overpass_api, shapely_source_way, found_osm_way, shapely_found_osm_way):
     # Check if source or targets are not huge (we need this as we want to put conflation of way in a single changeset)
     assert len(shapely_source_way.coords) < 3000
     assert len(shapely_found_osm_way.coords) < 2000
+
+    unglue_ways_as_needed = config['unglue_ways_as_needed']
+    max_distance_end_points_to_consider_in_meters = config['max_distance_end_points_to_consider_in_meters']
 
     # Check if way is not national border
     if 'admin_level' in found_osm_way.tags and int(found_osm_way.tags['admin_level']) <= 2:
@@ -215,27 +213,24 @@ def is_conflate_possible(osmapi, overpass_api, shapely_source_way, found_osm_way
     response = get_entities_shared_with_way(overpass_api, found_osm_way.id)
     for way in response.ways:
         if 'admin_level' in way.tags and int(way.tags['admin_level']) <= 2:
-            print('Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{0} which is national border, skipping'.format(
-                way.id))
+            print(f'Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{way.id} which is national border, skipping')
             return ProcessingState.ERROR_NODE_IN_NATIONAL_BORDER, str(way.id)
         if 'boundary' not in way.tags:
-            print('Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{0} which do not have boundary tag, skipping'.format(
-                way.id))
-            if UNGLUE_WAYS_AS_NEEDED:
-                one_way = unglue_ways(osmapi, found_osm_way.id, way.id)
+            print(f'Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{way.id} which do not have boundary tag, skipping')
+            if unglue_ways_as_needed:
+                one_way = unglue_ways(config, osmapi, found_osm_way.id, way.id)
                 if not one_way:
-                    other_way = unglue_ways(osmapi, way.id, found_osm_way.id)
+                    other_way = unglue_ways(config, osmapi, way.id, found_osm_way.id)
                     if not other_way:
                         return ProcessingState.ERROR_NODE_IN_OTHER_WAYS, str(way.id)
             else:
                 return ProcessingState.ERROR_NODE_IN_OTHER_WAYS, str(way.id)
         elif way.tags['boundary'] != 'administrative':
-            print('Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{0} which boundary tag != administrative, skipping'.format(
-                way.id))
-            if UNGLUE_WAYS_AS_NEEDED:
-                one_way = unglue_ways(osmapi, found_osm_way.id, way.id)
+            print(f'Way to conflate contains node which is also part of way https://www.openstreetmap.org/way/{way.id} which boundary tag != administrative, skipping')
+            if unglue_ways_as_needed:
+                one_way = unglue_ways(config, osmapi, found_osm_way.id, way.id)
                 if not one_way:
-                    other_way = unglue_ways(osmapi, way.id, found_osm_way.id)
+                    other_way = unglue_ways(config, osmapi, way.id, found_osm_way.id)
                     if not other_way:
                         return ProcessingState.ERROR_NODE_IN_OTHER_WAYS, str(way.id)
             else:
@@ -244,23 +239,23 @@ def is_conflate_possible(osmapi, overpass_api, shapely_source_way, found_osm_way
         is_city = 'place' in relation.tags and relation.tags['place'] == 'city'
         if 'admin_level' not in relation.tags:
             if not is_city:
-                print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} which do not have admin_level tag, skipping'.format(relation.id))
+                print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} which do not have admin_level tag, skipping')
                 return ProcessingState.ERROR_NODE_IN_OTHER_RELATION, str(relation.id)
         elif int(relation.tags['admin_level']) <= 2:
-            print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} which is national border, skipping'.format(relation.id))
+            print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} which is national border, skipping')
             return ProcessingState.ERROR_NODE_IN_NATIONAL_RELATION, str(relation.id)
         if 'type' not in relation.tags:
-            print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} which do not have type tag, skipping'.format(relation.id))
+            print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} which do not have type tag, skipping')
             return ProcessingState.ERROR_NODE_IN_OTHER_RELATION, str(relation.id)
         elif relation.tags['type'] != 'boundary' and not is_city:
-            print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} where type != boundary, skipping'.format(relation.id))
+            print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} where type != boundary, skipping')
             return ProcessingState.ERROR_NODE_IN_OTHER_RELATION, str(relation.id)
         if 'boundary' not in relation.tags:
             if not is_city:
-                print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} which do not have boundary tag, skipping'.format(relation.id))
+                print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} which do not have boundary tag, skipping')
                 return ProcessingState.ERROR_NODE_IN_OTHER_RELATION, str(relation.id)
         elif relation.tags['boundary'] != 'administrative' and relation.tags['boundary'] != 'census':
-            print('Way to conflate belongs to relation https://www.openstreetmap.org/relation/{0} where boundary != administrative or census, skipping'.format(relation.id))
+            print(f'Way to conflate belongs to relation https://www.openstreetmap.org/relation/{relation.id} where boundary != administrative or census, skipping')
             return ProcessingState.ERROR_NODE_IN_OTHER_RELATION, str(relation.id)
 
     # Check if nodes on way in OSM are not having any tags
@@ -270,9 +265,8 @@ def is_conflate_possible(osmapi, overpass_api, shapely_source_way, found_osm_way
 
     # Check if end points are close enough
     distance, should_reverse = get_bigger_endpoint_difference(shapely_source_way, shapely_found_osm_way)
-    if distance > MAX_DISTANCE_END_POINTS_TO_CONSIDER_IN_METERS:
-        print('End points of ways to conflate are different for more that {0}m ({1}m), skipping'.format(
-            MAX_DISTANCE_END_POINTS_TO_CONSIDER_IN_METERS, distance))
+    if distance > max_distance_end_points_to_consider_in_meters:
+        print(f'End points of ways to conflate are different for more that {max_distance_end_points_to_consider_in_meters}m ({distance}m), skipping')
         return ProcessingState.ERROR_END_POINTS_FAR_APART, str(distance)
     if should_reverse:
         shapely_source_way.coords = list(shapely_source_way.coords[::-1])
@@ -360,7 +354,10 @@ def calculate_initial_compass_bearing(pointA, pointB):
     return compass_bearing
 
 
-def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
+def conflate_way(config, osmapi, overpass_api, source_data, source_way, found_osm_way):
+    auto_proceed = config['auto_proceed']
+    dry_run = config['dry_run']
+
     shapely_found_osm_way = create_geometry_from_osm_way(found_osm_way, None)
     shapely_source_way = create_geometry_from_osm_file_data(source_data, source_way)
 
@@ -380,7 +377,7 @@ def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
     if is_same_geometry(shapely_source_way, shapely_found_osm_way):
         print('Way to conflate seems already conflated, skipping')
         return ProcessingState.CONFLATED, None
-    is_conflate_possible_error, error_context = is_conflate_possible(osmapi, overpass_api, shapely_source_way,
+    is_conflate_possible_error, error_context = is_conflate_possible(config, osmapi, overpass_api, shapely_source_way,
                                                                      found_osm_way, shapely_found_osm_way)
     if is_conflate_possible_error != ProcessingState.CHECKED_POSSIBLE:
         return is_conflate_possible_error, error_context
@@ -392,7 +389,7 @@ def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
     angle2 = calculate_initial_compass_bearing(shapely_source_way.coords[0], shapely_source_way.coords[-1])
     heuristically_same = almost_same_ways and math.fabs(angle1-angle2) < 5
     if not heuristically_same:
-        if not AUTO_PROCEED:
+        if not auto_proceed:
             # # TODO: use something better, like https://stackoverflow.com/questions/56448933/plotting-shapely-polygon-on-cartopy
             plt.figure()
             plt.plot(*shapely_found_osm_way.coords.xy, color='red')
@@ -421,14 +418,14 @@ def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
                                       shapely_source_way.coords[i][0], shapely_source_way.coords[i][1])
             node_to_conflate['lon'] = shapely_source_way.coords[i][0]
             node_to_conflate['lat'] = shapely_source_way.coords[i][1]
-            if not DRY_RUN:
+            if not dry_run:
                 osmapi.NodeUpdate(node_to_conflate)
         else:
             nodes_to_delete.append(node_to_conflate)
             osm_way_to_conflate['nd'].remove(node_to_conflate['id'])
     for i in range(len(osm_way_to_conflate['nd'])-1, len(shapely_source_way.coords) - 1):
         added_node = {'id': -i, 'lon': shapely_source_way.coords[i][0], 'lat': shapely_source_way.coords[i][1], 'tag': {}}
-        if not DRY_RUN:
+        if not dry_run:
             osmapi.NodeCreate(added_node)
         osm_way_to_conflate['nd'].insert(-1, added_node['id'])
     # Fix last node
@@ -439,10 +436,10 @@ def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
 
     last_node_to_conflate['lon'] = shapely_source_way.coords[-1][0]
     last_node_to_conflate['lat'] = shapely_source_way.coords[-1][1]
-    if not DRY_RUN:
+    if not dry_run:
         osmapi.NodeUpdate(last_node_to_conflate)
 
-    if not DRY_RUN:
+    if not dry_run:
         osmapi.WayUpdate(osm_way_to_conflate)
         # Deleting nodes needs to happen after we update way
         for node_to_delete in nodes_to_delete:
@@ -454,24 +451,29 @@ def conflate_way(osmapi, overpass_api, source_data, source_way, found_osm_way):
         return ProcessingState.CHECKED_POSSIBLE, None
 
 
-def main():
-    #overpass_api = overpy.Overpass(url='http://overpass-api.de/api/interpreter')
-    #overpass_api = overpy.Overpass(url='https://lz4.overpass-api.de/api/interpreter')
-    overpass_api = overpy.Overpass(url='http://localhost:12345/api/interpreter')
+def main(input_osm_file, progress_file):
+    with open('config.yml', 'r') as config_yml_file:
+        config = yaml.safe_load(config_yml_file)
+
+    overpass_api = overpy.Overpass(url=config['overpass_url'])
+    auto_proceed = config['auto_proceed']
+    country = config['country']
+    level9_ref_key = config['level9_ref_key']
+
     osmapi = OsmApi(passwordfile='osm-password',
                     changesetauto=True,
                     changesetautosize=10000, changesetautotags=
                     {
-                        u"comment": u"Serbian lint bot - conflating boundaries (https://lists.openstreetmap.org/pipermail/imports/2020-January/006149.html).",
-                        u"tag": u"mechanical=yes", u"source": u"RGZ_Import"
+                        u"comment": config['changeset_comment'],
+                        u"tag": u"mechanical=yes", u"source": config['changeset_source']
                     })
 
-    if not os.path.isfile('conflate-progress.pickle'):
-        print('Cannot find conflate-progress.pickle, starting from scratch')
-        source_data = load_osm('output/rpj.osm')
-        print('Loaded .osm file')
+    if not os.path.isfile(progress_file):
+        print(f'Cannot find {progress_file}, starting from scratch')
+        source_data = load_osm(input_osm_file)
+        print(f'Loaded .osm file {input_osm_file}')
     else:
-        with open('conflate-progress.pickle', 'rb') as p:
+        with open(progress_file, 'rb') as p:
             source_data = pickle.load(p)
 
     # Iterate for each way in .osm
@@ -490,63 +492,63 @@ def main():
                 relations.append(relation)
         assert len(relations) > 0
         if len(relations) == 2:
-            relation_text = "{0} (mb: {1}) - {2} (mb: {3})".format(
-                relations[0]['tags']['name'], relations[0]['tags']['naselje_mb'],
-                relations[1]['tags']['name'], relations[1]['tags']['naselje_mb'])
+            relation_text = "{0} (ref: {1}) - {2} (ref: {3})".format(
+                relations[0]['tags']['name'], relations[0]['tags']['level9_id'],
+                relations[1]['tags']['name'], relations[1]['tags']['level9_id'])
         elif len(relations) == 1:
-            relation_text = "{0} (mb: {1})".format(
-                relations[0]['tags']['name'], relations[0]['tags']['naselje_mb'])
+            relation_text = "{0} (ref: {1})".format(
+                relations[0]['tags']['name'], relations[0]['tags']['level9_id'])
         elif len(relations) == 3:
-            relation_text = "{0} (mb: {1}) - {2} (mb: {3}) - {4} (mb: {5})".format(
-                relations[0]['tags']['name'], relations[0]['tags']['naselje_mb'],
-                relations[1]['tags']['name'], relations[1]['tags']['naselje_mb'],
-                relations[2]['tags']['name'], relations[2]['tags']['naselje_mb'])
+            relation_text = "{0} (ref: {1}) - {2} (ref: {3}) - {4} (ref: {5})".format(
+                relations[0]['tags']['name'], relations[0]['tags']['level9_id'],
+                relations[1]['tags']['name'], relations[1]['tags']['level9_id'],
+                relations[2]['tags']['name'], relations[2]['tags']['level9_id'])
         way['relations'] = relation_text
 
         # If way is shared between two relations, we try to find it in OSM using that information,
         # Otherwise, if it is part of just one relation, we try to find it in OSM with that.
         if len(relations) == 2:
-            settlement0_mb = relations[0]['tags']['naselje_mb']
-            settlement1_mb = relations[1]['tags']['naselje_mb']
-            osm_response = get_osm_shared_ways(overpass_api, settlement0_mb, settlement1_mb)
+            settlement0_id = relations[0]['tags']['level9_id']
+            settlement1_id = relations[1]['tags']['level9_id']
+            osm_response = get_osm_shared_ways(overpass_api, settlement0_id, settlement1_id, country, level9_ref_key)
             if len(osm_response.ways) == 0:
-                print('Cannot find shared way in OSM between settlements {0} (mb: {1}) and {2} (mb: {3}), skipping'.
-                      format(relations[0]['tags']['name'], settlement0_mb,
-                             relations[1]['tags']['name'], settlement1_mb))
+                print('Cannot find shared way in OSM between settlements {0} (ref: {1}) and {2} (ref: {3}), skipping'.
+                      format(relations[0]['tags']['name'], settlement0_id,
+                             relations[1]['tags']['name'], settlement1_id))
                 way['processed'] = ProcessingState.ERROR_SHARED_WAY_NOT_FOUND
                 way['error_context'] = None
             elif len(osm_response.ways) > 1:
-                print('More than 1 shared way in OSM between settlements {0} (mb: {1}) and {2} (mb: {3}), '
+                print('More than 1 shared way in OSM between settlements {0} (ref: {1}) and {2} (ref: {3}), '
                       'fix by merging ways manually, skipping'.
-                      format(relations[0]['tags']['name'], settlement0_mb,
-                             relations[1]['tags']['name'], settlement1_mb))
+                      format(relations[0]['tags']['name'], settlement0_id,
+                             relations[1]['tags']['name'], settlement1_id))
                 way['processed'] = ProcessingState.ERROR_MULTIPLE_SHARED_WAYS
                 way['error_context'] = ','.join([str(w.id) for w in osm_response.ways])
             else:
                 print('Processing way https://www.openstreetmap.org/way/{0} shared between {1} and {2}'.format(
                     osm_response.ways[0].id, relations[0]['tags']['name'], relations[1]['tags']['name']))
-                processed, error_context = conflate_way(osmapi, overpass_api, source_data, way, osm_response.ways[0])
+                processed, error_context = conflate_way(config, osmapi, overpass_api, source_data, way, osm_response.ways[0])
                 way['processed'] = processed
                 way['osm_way'] = osm_response.ways[0].id
                 way['error_context'] = error_context
         elif len(relations) == 1:
-            settlement_mb = relations[0]['tags']['naselje_mb']
-            osm_response = get_osm_single_way(overpass_api, settlement_mb)
+            settlement_id = relations[0]['tags']['level9_id']
+            osm_response = get_osm_single_way(overpass_api, settlement_id, country, level9_ref_key)
             if len(osm_response.ways) == 0:
-                print('Cannot find way in OSM that belongs only to settlement {0} (mb: {1}), skipping'.
-                      format(relations[0]['tags']['name'], settlement_mb))
+                print('Cannot find way in OSM that belongs only to settlement {0} (ref: {1}), skipping'.
+                      format(relations[0]['tags']['name'], settlement_id))
                 way['processed'] = ProcessingState.ERROR_WAY_NOT_FOUND
                 way['error_context'] = None
             elif len(osm_response.ways) > 1:
-                print('More than 1 way in OSM that belongs only to settlement {0} (mb: {1}), '
+                print('More than 1 way in OSM that belongs only to settlement {0} (ref: {1}), '
                       'fix by merging ways manually, skipping'.format(
-                    relations[0]['tags']['name'], settlement_mb))
+                    relations[0]['tags']['name'], settlement_id))
                 way['processed'] = ProcessingState.ERROR_MULTIPLE_SINGLE_WAY
                 way['error_context'] = ','.join([str(w.id) for w in osm_response.ways])
             else:
                 print('Processing way https://www.openstreetmap.org/way/{0} belonging only to {1}'.format(
                     osm_response.ways[0].id, relations[0]['tags']['name']))
-                processed, error_context = conflate_way(osmapi, overpass_api, source_data, way, osm_response.ways[0])
+                processed, error_context = conflate_way(config, osmapi, overpass_api, source_data, way, osm_response.ways[0])
                 way['processed'] = processed
                 way['osm_way'] = osm_response.ways[0].id
                 way['error_context'] = error_context
@@ -556,10 +558,10 @@ def main():
             way['error_context'] = None
 
         # Dump current progress
-        with open('conflate-progress.pickle', 'wb') as h:
+        with open(progress_file, 'wb') as h:
             pickle.dump(source_data, h, protocol=pickle.DEFAULT_PROTOCOL)
 
-        if not AUTO_PROCEED:
+        if not auto_proceed:
             proceed = input('Continue with next way? (Y/n)?')
             if proceed == '' or proceed.lower() == 'y' or proceed.lower() == u'з':
                 continue
@@ -569,4 +571,9 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    if len(sys.argv) != 3:
+        print("Usage: ./conflate.py <input_osm_file> <progress_file>")
+        exit()
+    input_osm_file = sys.argv[1]
+    progress_file = sys.argv[2]
+    main(input_osm_file, progress_file)

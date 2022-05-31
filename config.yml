@@ -1,0 +1,39 @@
+# Official name of country. Needed for various Overpass OSM queries
+country: Србија
+
+# Used as a template for "source" tag of changesets
+changeset_source: "open Serbian cadastre data Jan 2022"
+
+# Used as a comment for changesets when doing semi-automatic conflation
+changeset_comment: "Serbian bot - conflating boundaries (https://lists.openstreetmap.org/pipermail/imports/2020-January/006149.html)."
+
+# Name of the OSM tag that keeps ID of your level 9 entities (settlements...). It can be as simple as "ref"
+level9_ref_key: "ref:RS:naselje"
+
+# Name of the OSM tag that keeps ID of your level 8 entities (municipalities...). It can be as simple as "ref"
+level8_ref_key: "ref:RS:opstina"
+
+# Overpass endpoint. You need to have docker to set up your own Overpass instance (see "refresh-osm-data.sh" for details)
+# Commented out are other potential options, but beware of throttling and misuse
+overpass_url: "http://localhost:12345/api/interpreter"
+# overpass_url: "https://lz4.overpass-api.de/api/interpreter"
+# overpass_url: "http://overpass-api.de/api/interpreter"
+
+# If True, scripts will just assess conflation potential and will not submit anything to OSM.
+# If False, there will be actual process of OSM submission. In that case, please set "auto_proceed" to false, so you
+# can control process after each way.
+dry_run: True
+
+# Should human control stepping up after each processed way. Set to true when actually submitting to OSM.
+auto_proceed: True
+
+# If way is eligable for conflation, and some other nodes/ways relations are glued to it, should we unglue them.
+# If you unglue them, you will get two ways with same geometries (with different tags, of course). If you set this to False,
+# ways will be reported as not eligible for conflation.
+unglue_ways_as_needed: True
+
+# How far apart any endpoints of the way should be from OSM way to consider them eligable for conflation.
+# If any endpoint is in greater distance than this, script will not conflate this road. If you set this too low,
+# lot of ways that could be conflated will be reported as not possible. If you set this too high, you might get false
+# positives and wrong ways could be conflated by error.
+max_distance_end_points_to_consider_in_meters: 500

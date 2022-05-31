@@ -2,6 +2,7 @@ import csv
 import functools
 import http.client
 import socket
+import sys
 import time
 import urllib.error
 from collections import OrderedDict
@@ -9,6 +10,8 @@ from collections import OrderedDict
 import shapely.geometry as geometry
 from overpy.exception import OverpassTooManyRequests, OverpassGatewayTimeout, OverpassUnknownContentType
 from shapely.ops import linemerge, unary_union, polygonize
+
+csv.field_size_limit(sys.maxsize)
 
 
 def retry_on_error(timeout_in_seconds=60):
@@ -67,7 +70,7 @@ def create_geometry_from_osm_response(relation, response):
 
 
 @retry_on_error(timeout_in_seconds=2*60)
-def get_polygon_by_cadastre_id(api, admin_level, cadastre_id, country='Србија', id_key='ref:sr:maticni_broj'):
+def get_polygon_by_cadastre_id(api, admin_level, cadastre_id, country, id_key):
     response = api.query("""
     area["name"="{0}"]["admin_level"=2]->.c;
     relation(area.c)["admin_level"={1}]["{2}"={3}];

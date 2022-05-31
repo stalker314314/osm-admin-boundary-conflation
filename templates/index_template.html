@@ -4,9 +4,8 @@
 <head>
     <meta charset="utf-8">
 
-    <title>Import registra prostornih jedinica - 31.01.2019.</title>
-    <meta name="description" content="Import registra prostornih jedinica">
-    <meta name="author" content="Branko Kokanović">
+    <title>OSM admin boundary conflation report</title>
+    <meta name="description" content="OSM admin boundary conflation report">
 
     <link type="text/css" rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/jsgrid/1.5.3/jsgrid.min.css" />
     <link type="text/css" rel="stylesheet"
@@ -14,36 +13,37 @@
 </head>
 
 <body>
-    <h1>Import registra prostornih jedinica - 31.01.2019.</h1>
-    <a href="#" id="toggleLegend">Prikaži legendu</a>
+    <h1>OSM admin boundary conflation report</h1>
+    <a href="#" id="toggleLegend">Toggle legend</a>
     <div id="legend" style="display: none;">
-    <p>Pogledajte <a href="https://forum.openstreetmap.org/viewtopic.php?id=68288">forum</a> ako želite da pomognete. Evo objašnjenja kolona:<p>
+    <p>Explanation of all columns in report<p>
         <ul>
-            <li><strong>Way ID</strong> &mdash; ID way-a iz rpj-v2.osm fajla pripremljenog za import. Nije od velike važnosti</li>
-            <li><strong>Granična naselja</strong> &mdash; Jedno ili dva naselja sa kojima se ovaj put graniči</li>
-            <li><strong>OSM Way</strong> &mdash; ukoliko je jednoznačno određen way u OSM-u, biće upisan ovde</li>
-            <li><strong>Stanje sređivanja</strong> &mdash; da li je sređivanje odrađeno, da li je moguće i ako nije moguće - razlog zašto nije</li>
-            <li><strong>Dodatak uz grešku</strong> &mdash; ako je bilo greške, ovde je dopisan dodatak uz grešku koji može da pomogne u popravljanju</li>
+            <li><strong>Way ID</strong> &mdash; ID of the way from .osm file. Not of great importance</li>
+            <li><strong>Shared entities</strong> &mdash; One of two level 9 entities with which this way is sharing border</li>
+            <li><strong>OSM Way</strong> &mdash; if we are sure we uniquely identified OSM way, it will be shown here</li>
+            <li><strong>Conflation potential</strong> &mdash; is conflation done, is it possible and if not - why not</li>
+            <li><strong>Additional context</strong> &mdash; if there is any conflation errors, here is additional context that can give more clarity and help in fixing problem</li>
         </ul>
-        <p>Evo spiska svih grešaka:</p>
+        <p>List of all conflation errors:</p>
         <ul>
             {% for key, value in errors.items() %}
                 <li><strong>{{ key.name }}</strong> &mdash; {{ value }}</li>
             {% endfor %}
         </ul>
-        <p>Statistika:</p>
+        <p>Statistics:</p>
         <ul>
-            <li><strong>Ukupno puteva</strong> &mdash; {{ total_ways }}</li>
-            <li><strong>Obrađeno puteva</strong> &mdash; {{ processed_ways}} </li>
-            <li><strong>Puteva nađeno u OSM-u</strong> &mdash; {{ ways_with_osm_ways_found }}</li>
+            <li><strong>Total ways</strong> &mdash; {{ total_ways }}</li>
+            <li><strong>Processed ways</strong> &mdash; {{ processed_ways}} </li>
+            <li><strong>Ways found in OSM</strong> &mdash; {{ ways_with_osm_ways_found }}</li>
         </ul>
-        <p>Po stanju sređivanja</p>
+        <p>Statistics of conflation errors:</p>
         <ul>
             {% for key, value in count_per_error.items() %}
                 <li><strong>{{ key.name }}</strong> &mdash; {{ value }} ({{ "{:.2f}".format((100.0 * value) / total_ways) }}%)</li>
             {% endfor %}
         </ul>
     </div>
+    <br/>
     <div id="jsGrid"></div>
 
     <script type="text/javascript" src="https://ajax.aspnetcdn.com/ajax/jQuery/jquery-2.2.4.min.js"></script>
@@ -61,6 +61,7 @@
             return str.replace(new RegExp(find, 'g'), replace);
         };
 
+        // Needed for easier search for Serbian language, but can be ignored for everyone else
         function transliterate(s) {
             return s.toLowerCase()
                 .replaceAll('а', 'a')
@@ -149,21 +150,21 @@
             selecting: false,
             autoload: true,
 
-            noDataContent: "Nije ništa pronađeno",
-            pagerFormat: "Strane: {first} {prev} {pages} {next} {last}    {pageIndex} od {pageCount}",
-            pagePrevText: "Prethodna",
-            pageNextText: "Sledeća",
-            pageFirstText: "Prva",
-            pageLastText: "Poslednja",
+            noDataContent: "Nothing found",
+            pagerFormat: "Pages: {first} {prev} {pages} {next} {last}    {pageIndex} of {pageCount}",
+            pagePrevText: "Previous",
+            pageNextText: "Next",
+            pageFirstText: "First",
+            pageLastText: "Last",
 
             controller: db,
 
             fields: [
                 { name: "way_id", type: "text", width: 100, title: "Way ID", filtering: false },
-                { name: "relations", type: "text", width: 300, title: "Granična naselja", filtering: true },
+                { name: "relations", type: "text", width: 300, title: "Shared entities", filtering: true },
                 { name: "osm_way", type: "text", width: 100, title: "OSM Way", filtering: false },
-                { name: "error", type: "select", items: db.errors, valueField: "Id", textField: "Name", title: "Stanje sređivanja", width: 200, filtering: true },
-                { name: "error_context", type: "text", width: 300, title: "Dodatak uz grešku", filtering: false },
+                { name: "error", type: "select", items: db.errors, valueField: "Id", textField: "Name", title: "Conflation potential", width: 200, filtering: true },
+                { name: "error_context", type: "text", width: 300, title: "Additional context", filtering: false },
             ]
         });
     </script>

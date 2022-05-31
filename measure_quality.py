@@ -7,6 +7,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from threading import Lock
 
 import overpy
+import yaml
 from shapely.wkt import loads
 
 from common import retry_on_error, create_geometry_from_osm_response, get_polygon_by_cadastre_id, load_level9_features
@@ -19,7 +20,6 @@ results = []
 @retry_on_error()
 def get_level9_polygon_by_name(api, country, level6_name, level8_name):
     for admin_level in (8, 7):
-        #TODO: remove Serbia
         response = api.query("""
 area["name"="{0}"]["admin_level"=2]->.country;
 (
@@ -68,9 +68,12 @@ def write_results(current_results, output_file):
                 writer.writerow(data)
 
 
-def process_level9(overpass_api, level9_entity, count_processed, total_to_process):
+def process_level9(config, overpass_api, level9_entity, count_processed, total_to_process):
     global results
     print('Processed {0}/{1}'.format(count_processed, total_to_process))
+
+    country = config['country']
+    level9_ref_key = config['level9_ref_key']
 
     cadastre_level9_polygon = loads(level9_entity['wkt'])
     level6_name = level9_entity['level6_name']
@@ -80,15 +83,14 @@ def process_level9(overpass_api, level9_entity, count_processed, total_to_proces
 
     print('Processing {0} {1}'.format(level8_name, level9_name))
 
-    # TODO: remove id_key to config
     overpass_level9_polygon, osm_settlement_name, osm_relation_id, national_border = \
-        get_polygon_by_cadastre_id(overpass_api, 9, level9_id, id_key='ref:RS:naselje')
+        get_polygon_by_cadastre_id(overpass_api, admin_level=9, cadastre_id=level9_id, country=country, id_key=level9_ref_key)
     if overpass_level9_polygon is None:
-        print('Level 8 {0} and level 9 {1} not found using ref:RS:naselje'.format(level8_name, level9_name))
+        print(f'Level 8 {level8_name} and level 9 {level9_name} not found using {level9_ref_key}')
         overpass_level9_polygon, osm_settlement_name, osm_relation_id, national_border = \
-            get_level9_polygon_by_name(overpass_api, level8_name, level9_name)
+            get_level9_polygon_by_name(overpass_api, country, level8_name, level9_name)
         if overpass_level9_polygon is None:
-            print('Level8 {0} and level9 {1} not found at all'.format(level8_name, level9_name))
+            print(f'Level8 {level8_name} and level9 {level9_name} not found at all')
             result = {'level6_name': level6_name, 'level8_name': level8_name, 'level9_name': level9_name,
                       'osm_settlement_name': '', 'relation_id': -1, 'area_diff': -1, 'area_not_shared': -1,
                       'national_border': national_border}
@@ -114,7 +116,7 @@ def process_level9(overpass_api, level9_entity, count_processed, total_to_proces
     return result
 
 
-def measure_quality(overpass_api, input_csv_file, output_file):
+def measure_quality(config, overpass_api, input_csv_file, output_file):
     global results
     results = get_current_results(output_file)
     level9_features = load_level9_features(input_csv_file)
@@ -132,7 +134,7 @@ def measure_quality(overpass_api, input_csv_file, output_file):
                 print('Level8 {0} and level9 {1} already processed'.format(level8_name, level9_name))
                 continue
 
-            future = executor.submit(process_level9, overpass_api, level9_feature, count_processed, len(level9_features))
+            future = executor.submit(process_level9, config, overpass_api, level9_feature, count_processed, len(level9_features))
             all_futures.append(future)
             count_processed = count_processed + 1
         for future in as_completed(all_futures):
@@ -141,13 +143,14 @@ def measure_quality(overpass_api, input_csv_file, output_file):
 
 
 if __name__ == '__main__':
-    #overpass_api = overpy.Overpass(url='https://lz4.overpass-api.de/api/interpreter')
-    overpass_api = overpy.Overpass(url='http://overpass-api.de/api/interpreter')
-    #overpass_api = overpy.Overpass(url='http://localhost:12345/api/interpreter')
+    with open('config.yml', 'r') as config_yml_file:
+        config = yaml.safe_load(config_yml_file)
+
+    overpass_api = overpy.Overpass(url=config['overpass_url'])
 
     if len(sys.argv) != 3:
         print("Usage: ./measure_quality.py <input_csv_file> <output_csv_file>")
         exit()
     input_csv_file = sys.argv[1]
     output_csv_file = sys.argv[2]
-    measure_quality(overpass_api, input_csv_file, output_csv_file)
+    measure_quality(config, overpass_api, input_csv_file, output_csv_file)
