@@ -4,16 +4,17 @@ import pickle
 import sys
 import time
 import xml.etree.ElementTree as ET
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import overpy
 import pyproj
 import shapely.geometry as geometry
 import yaml
-
 from osmapi import OsmApi
 from shapely.ops import linemerge
 
+from atomic_write import atomic_write
 from common import retry_on_error
 from processing_state import ProcessingState
 
@@ -472,6 +473,7 @@ def main(input_osm_file, progress_file):
         print(f'Cannot find {progress_file}, starting from scratch')
         source_data = load_osm(input_osm_file)
         print(f'Loaded .osm file {input_osm_file}')
+        Path(progress_file).touch()  # need to touch file for atomic writes later
     else:
         with open(progress_file, 'rb') as p:
             source_data = pickle.load(p)
@@ -557,8 +559,8 @@ def main(input_osm_file, progress_file):
             way['osm_way'] = None
             way['error_context'] = None
 
-        # Dump current progress
-        with open(progress_file, 'wb') as h:
+        # Dump current progress (use atomic_writes to guard for semi-written files as those pickle dumps can be huge)
+        with atomic_write(progress_file, text=False, keep=False) as h:
             pickle.dump(source_data, h, protocol=pickle.DEFAULT_PROTOCOL)
 
         if not auto_proceed:
