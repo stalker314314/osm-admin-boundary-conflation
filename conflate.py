@@ -109,7 +109,7 @@ def get_entities_shared_with_way(api, way_id):
     return response
 
 
-def create_geometry_from_osm_way(way, response):
+def create_geometry_from_osm_way(way):
     # Try to build shapely polygon out of this data
     lss = []
     ls_coords = []
@@ -359,7 +359,7 @@ def conflate_way(config, osmapi, overpass_api, source_data, source_way, found_os
     auto_proceed = config['auto_proceed']
     dry_run = config['dry_run']
 
-    shapely_found_osm_way = create_geometry_from_osm_way(found_osm_way, None)
+    shapely_found_osm_way = create_geometry_from_osm_way(found_osm_way)
     shapely_source_way = create_geometry_from_osm_file_data(source_data, source_way)
 
     if len(source_way['nodes']) >= 2000:
@@ -384,7 +384,7 @@ def conflate_way(config, osmapi, overpass_api, source_data, source_way, found_os
         return is_conflate_possible_error, error_context
 
     # Do basic check that can cut off lot of already-almost conflated ways
-    # Shapes are same if dilated way can fit inside other way and if angle (degrees) of end points is less than 5 degree
+    # Shapes are same if inflated way can fit inside other way and if angle (in degrees) of end points is less than 5 degree
     almost_same_ways = shapely_source_way.within(shapely_found_osm_way.buffer(0.005))
     angle1 = calculate_initial_compass_bearing(shapely_found_osm_way.coords[0], shapely_found_osm_way.coords[-1])
     angle2 = calculate_initial_compass_bearing(shapely_source_way.coords[0], shapely_source_way.coords[-1])
@@ -410,7 +410,7 @@ def conflate_way(config, osmapi, overpass_api, source_data, source_way, found_os
     assert len(osm_way_nodes_to_conflate) == len(osm_way_to_conflate['nd']) + 1
     for i in range(len(osm_way_to_conflate['nd'])-1):
         # since we are in-place modifying this list, we need to offset it by this much,
-        # this is why we substact len of nodes_to_delete
+        # this is why we substract len of nodes_to_delete
         node_id_to_conflate = osm_way_to_conflate['nd'][i-len(nodes_to_delete)]
         node_to_conflate = next(n['data'] for n in osm_way_nodes_to_conflate if n['data']['id'] == node_id_to_conflate)
         if i < len(shapely_source_way.coords) - 1:
