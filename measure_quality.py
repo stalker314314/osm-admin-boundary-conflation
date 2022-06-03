@@ -53,7 +53,7 @@ def get_current_results(output_file):
                     {'level6_name': row['level6_name'], 'level8_name': row['level8_name'],
                      'level9_name': row['level9_name'], 'osm_settlement_name': row['osm_settlement_name'],
                      'relation_id': row['relation_id'], 'area_diff': row['area_diff'],
-                     'area_not_shared': row['area_not_shared'], 'national_border': row['national_border']})
+                     'i_o_u': row['i_o_u'], 'national_border': row['national_border']})
     return results
 
 
@@ -62,7 +62,7 @@ def write_results(current_results, output_file):
         with open(output_file, 'w') as out_csv:
             writer = csv.DictWriter(out_csv, fieldnames=[
                 'level6_name', 'level8_name', 'level9_name', 'osm_settlement_name',
-                'relation_id', 'area_diff', 'area_not_shared', 'national_border'])
+                'relation_id', 'area_diff', 'i_o_u', 'national_border'])
             writer.writeheader()
             for data in current_results:
                 writer.writerow(data)
@@ -92,25 +92,20 @@ def process_level9(config, overpass_api, level9_entity, count_processed, total_t
         if overpass_level9_polygon is None:
             print(f'Level8 {level8_name} and level9 {level9_name} not found at all')
             result = {'level6_name': level6_name, 'level8_name': level8_name, 'level9_name': level9_name,
-                      'osm_settlement_name': '', 'relation_id': -1, 'area_diff': -1, 'area_not_shared': -1,
+                      'osm_settlement_name': '', 'relation_id': -1, 'area_diff': -1, 'i_o_u': -1,
                       'national_border': national_border}
             results.append(result)
             return result
 
-    cadastre_area = cadastre_level9_polygon.area
-    intersection_area = cadastre_level9_polygon.intersection(overpass_level9_polygon).area
+    intersection = cadastre_level9_polygon.intersection(overpass_level9_polygon)
+    union = cadastre_level9_polygon.union(overpass_level9_polygon)
+    i_o_u = intersection.area / union.area
 
-    a_minus_b = cadastre_level9_polygon.difference(overpass_level9_polygon)
-    b_minus_a = overpass_level9_polygon.difference(cadastre_level9_polygon)
-    a_minus_b_union_b_minus_a = a_minus_b.union(b_minus_a)
-    a_union_b = cadastre_level9_polygon.union(overpass_level9_polygon)
-    area_not_shared = a_minus_b_union_b_minus_a.area / a_union_b.area
-
-    print(level8_name, level9_name, osm_settlement_name, 100 * intersection_area/cadastre_area, area_not_shared)
+    print(level8_name, level9_name, osm_settlement_name, 100 * intersection.area/cadastre_level9_polygon.area, i_o_u)
     result = {'level6_name': level6_name, 'level8_name': level8_name, 'level9_name': level9_name,
               'osm_settlement_name': osm_settlement_name, 'relation_id': osm_relation_id,
-              'area_diff': round(intersection_area/cadastre_area, 5),
-              'area_not_shared': round(area_not_shared, 5),
+              'area_diff': round(intersection.area/cadastre_level9_polygon.area, 5),
+              'i_o_u': round(i_o_u, 5),
               'national_border': national_border}
     results.append(result)
     return result
