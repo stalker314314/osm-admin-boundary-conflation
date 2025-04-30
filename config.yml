@@ -27,7 +27,7 @@ dry_run: True
 # Should human control stepping up after each processed way. Set to true when actually submitting to OSM.
 auto_proceed: True
 
-# If way is eligable for conflation, and some other nodes/ways relations are glued to it, should we unglue them.
+# If way is eligible for conflation, and some other nodes/ways relations are glued to it, should we unglue them.
 # If you unglue them, you will get two ways with same geometries (with different tags, of course). If you set this to False,
 # ways will be reported as not eligible for conflation.
 unglue_ways_as_needed: True
